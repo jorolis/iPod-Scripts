@@ -1,0 +1,133 @@
+import win32com.client
+import os
+import unicodedata
+import glob
+import time
+import subprocess
+
+# ===== CONFIG =====
+NEW_ALAC_FOLDER = r"YOUR/ALAC/DIRECTORY"
+PLEX_PLAYLIST_FOLDER = r"/PLEX/EXPORTED/PLAYLISTS/DIRECTORY"
+
+# Path to iTunes executable (desktop version, adjust if needed)
+ITUNES_PATH = r"C:\Program Files\iTunes\iTunes.exe"
+
+# ===== START ITUNES IF NOT RUNNING =====
+running = any("iTunes.exe" in p for p in os.popen("tasklist").read().splitlines())
+if not running:
+    print("➡ Starting iTunes...")
+    subprocess.Popen([ITUNES_PATH])
+    time.sleep(5)  # initial wait for process to start
+
+# ===== INITIALIZE ITUNES COM =====
+itunes = win32com.client.Dispatch("iTunes.Application")
+
+# Wait until iTunes library is fully ready
+print("➡ Waiting for iTunes to fully start... (this may take a minute for large libraries)")
+while True:
+    try:
+        track_count = itunes.LibraryPlaylist.Tracks.Count
+        break
+    except Exception:
+        time.sleep(2)
+print(f"✅ iTunes is ready! Library contains {track_count} tracks.")
+
+# ===== STEP 1: Build library map FIRST (to skip already imported ALAC files) =====
+print("➡ Building library track map...")
+library_tracks = itunes.LibraryPlaylist.Tracks
+library_map = {}
+for i in range(1, library_tracks.Count + 1):
+    track = library_tracks.Item(i)
+    try:
+        if track.Location and os.path.exists(track.Location):
+            library_map[os.path.normcase(track.Location)] = track
+    except Exception:
+        continue
+print(f"Library map created for {len(library_map)} tracks")
+
+# ===== STEP 2: Recursively add ALAC files (skip existing) =====
+print("➡ Adding new ALAC files (recursive, skipping already added)...")
+alac_files = glob.glob(os.path.join(NEW_ALAC_FOLDER, "**", "*.m4a"), recursive=True) + \
+             glob.glob(os.path.join(NEW_ALAC_FOLDER, "**", "*.M4A"), recursive=True)
+
+added_count = 0
+for file in alac_files:
+    path_norm = os.path.normcase(file)
+    if path_norm in library_map:
+        continue  # Already in library, skip
+    if os.path.exists(file):
+        try:
+            print(f"Adding: {file}")
+            track = itunes.LibraryPlaylist.AddFile(file)
+            library_map[path_norm] = track  # update library map
+            added_count += 1
+        except Exception as e:
+            print(f"⚠ Could not add {file}: {e}")
+    else:
+        print(f"⚠ File does not exist: {file}")
+print(f"Added {added_count} new ALAC files to library")
+
+# ===== STEP 3: Process all Plex playlists =====
+m3u_files = glob.glob(os.path.join(PLEX_PLAYLIST_FOLDER, "*.m3u*"))
+
+for m3u_file in m3u_files:
+    playlist_name = os.path.splitext(os.path.basename(m3u_file))[0]
+    print(f"\n➡ Processing playlist: {playlist_name}")
+
+    with open(m3u_file, "r", encoding="utf-8-sig") as f:
+        paths = [unicodedata.normalize("NFC", line.strip()) for line in f if line.strip() and not line.startswith("#")]
+
+    # Check if playlist exists
+    playlist = None
+    for pl in itunes.LibrarySource.Playlists:
+        if pl.Name == playlist_name:
+            playlist = pl
+            print(f"Using existing playlist: {playlist_name}")
+            break
+    if not playlist:
+        playlist = itunes.CreatePlaylist(playlist_name)
+        print(f"Created new playlist: {playlist.Name}")
+
+    # Build set of already added tracks
+    existing_tracks = set()
+    for i in range(1, playlist.Tracks.Count + 1):
+        track = playlist.Tracks.Item(i)
+        try:
+            if track.Location:
+                existing_tracks.add(os.path.normcase(track.Location))
+        except Exception:
+            continue
+
+    # Add new tracks
+    added = 0
+    skipped = 0
+    for path in paths:
+        path_norm = os.path.normcase(path)
+        if path_norm in existing_tracks:
+            continue
+
+        track_to_add = library_map.get(path_norm)
+        if not track_to_add:
+            if os.path.exists(path):
+                track_to_add = itunes.LibraryPlaylist.AddFile(path)
+                library_map[path_norm] = track_to_add
+            else:
+                print(f"⚠ File not found: {path}")
+                skipped += 1
+                continue
+
+        try:
+            playlist.AddTrack(track_to_add)
+            added += 1
+        except Exception as e:
+            print(f"Could not add track: {path} -> {e}")
+            skipped += 1
+
+    print(f"Added {added} tracks to playlist '{playlist_name}'")
+    if skipped:
+        print(f"Skipped {skipped} tracks")
+
+# ===== STEP 4: iPod sync reminder =====
+print("\niPod sync via COM is not supported or unreliable.")
+print("Please manually sync your iPod in iTunes now.")
+print("iTunes will remain open so you can perform the sync safely.")
