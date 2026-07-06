@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# ===== CONFIG =====
+FLAC_DIR="YOUR_FLAC_PATH"
+ALAC_DIR="ALAC_OUTPUT_PATH"
+OUTPUT_LIST="$ALAC_DIR/missing_alac.txt"
+
+# Unraid's default share ownership
+HOST_UID=99   # nobody
+HOST_GID=100  # users
+
+# ===== ENSURE BASE PERMISSIONS =====
+echo "Ensuring correct ownership & ACLs on ALAC root folder..."
+chown -R nobody:users "$ALAC_DIR"
+chmod -R 775 "$ALAC_DIR"
+setfacl -R -m u:nobody:rwx,g:users:rwx "$ALAC_DIR"
+setfacl -d -m u:nobody:rwx,g:users:rwx "$ALAC_DIR"
+
+# ===== COMPARE COLLECTIONS =====
+echo "Comparing FLAC vs ALAC collections..."
+> "$OUTPUT_LIST"  # clear output file
+
+find "$FLAC_DIR" -type f -iname "*.flac" | while read -r flac_file; do
+    rel_path="${flac_file#$FLAC_DIR/}"
+    out="$ALAC_DIR/${rel_path%.flac}.m4a"
+    out_dir="$(dirname "$out")"
+
+    if [ ! -f "$out" ]; then
+        echo "$rel_path" >> "$OUTPUT_LIST"
+        echo "Converting: $rel_path"
+
+        mkdir -p "$out_dir"
+
+        docker run --rm \
+            --user $HOST_UID:$HOST_GID \
+            -v "$FLAC_DIR":"$FLAC_DIR":ro \
+            -v "$ALAC_DIR":"$ALAC_DIR":rw \
+            jrottenberg/ffmpeg:latest \
+            -i "$flac_file" \
+            -map 0:a -c:a alac "$out"
+    fi
+done
+
+echo "Conversion complete. Missing files list saved to: $OUTPUT_LIST"
