@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ===== CONFIG =====
-FLAC_DIR="YOUR_FLAC_PATH"
-ALAC_DIR="ALAC_OUTPUT_PATH"
+FLAC_DIR="YOUR\FLAC\PATH"
+ALAC_DIR="ALAC\OUTPUT\PATH"
 OUTPUT_LIST="$ALAC_DIR/missing_alac.txt"
 
 # Unraid's default share ownership
