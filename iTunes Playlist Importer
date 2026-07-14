@@ -130,4 +130,3 @@ for m3u_file in m3u_files:
 # ===== STEP 4: iPod sync reminder =====
 print("\niPod sync via COM is not supported or unreliable.")
 print("Please manually sync your iPod in iTunes now.")
-print("iTunes will remain open so you can perform the sync safely.")
